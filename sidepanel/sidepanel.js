@@ -38,6 +38,8 @@ const statsResetBtn    = document.getElementById("statsReset");
 const historySection   = document.getElementById("historySection");
 const historyListEl    = document.getElementById("historyList");
 const historyClearBtn  = document.getElementById("historyClear");
+const filenameTemplateEl = document.getElementById("filenameTemplate");
+const retryFailedBtn   = document.getElementById("retryFailedBtn");
 
 // ─────────────────────────────────────────────
 // Version from manifest
@@ -622,6 +624,14 @@ async function downloadGeneratedImages(newUrls, serialNum, promptText) {
   const name        = safePromptName(promptText);
   const serial      = String(serialNum).padStart(2, "0");
   const useSerial   = serialToggleEl.checked;
+  const template    = filenameTemplateEl?.value || "{serial}_{name}";
+  
+  // Build timestamp
+  const now = new Date();
+  const timestamp = now.toISOString().slice(0,19).replace(/[:T]/g,'-');
+  
+  // Build custom value (just a placeholder for user to replace)
+  const custom = "custom";
 
   // Filter to only genuine generated-output URLs.
   // Reference/ingredient images uploaded by the user come from blob: URLs
@@ -644,7 +654,17 @@ async function downloadGeneratedImages(newUrls, serialNum, promptText) {
     let url = outputUrls[j];
     if (!url.startsWith("http")) url = "https://labs.google" + url;
     const suffix   = outputUrls.length > 1 ? `_${j + 1}` : "";
-    const baseName = useSerial ? `${serial}_${name}` : name;
+    
+    // Build filename from template
+    let baseName = template
+      .replace(/{serial}/g, useSerial ? serial : "")
+      .replace(/{name}/g, name)
+      .replace(/{timestamp}/g, timestamp)
+      .replace(/{custom}/g, custom);
+    
+    // Clean up double underscores and leading/trailing underscores
+    baseName = baseName.replace(/_+/g, "_").replace(/^_|_$/g, "");
+    
     const filename = `${folder}/${baseName}${suffix}.jpg`;
     try { await chrome.downloads.download({ url, filename, saveAs: false }); }
     catch (e) { console.warn("[ZAPI FLOW] Download failed:", e); }
@@ -894,6 +914,13 @@ async function startQueue(startIndex = 0) {
   // Add to history
   addToHistory(lines);
 
+  // Show retry button if there are failed prompts
+  if (failedCount > 0 && retryFailedBtn) {
+    retryFailedBtn.style.display = "";
+  } else if (retryFailedBtn) {
+    retryFailedBtn.style.display = "none";
+  }
+
   if (stoppedCount > 0) {
     // Queue stopped for any reason with skipped prompts — offer to continue
     const firstStopped = promptStatuses.findIndex(p => p.status === "stopped");
@@ -940,12 +967,15 @@ stopBtn.addEventListener("click", async () => {
 // On launch — restore only settings (delay, folder, language)
 // Prompts always start fresh every session
 chrome.storage.local.get(
-  ["flowBatchWaitMin", "flowBatchWaitMax", "zapLang", "zapSerial", "zapStats", "zapHistory"],
+  ["flowBatchWaitMin", "flowBatchWaitMax", "zapLang", "zapSerial", "zapStats", "zapHistory", "zapFilenameTemplate"],
   (r) => {
     if (r.flowBatchWaitMin != null) waitMinEl.value = String(r.flowBatchWaitMin);
     if (r.flowBatchWaitMax != null) waitMaxEl.value = String(r.flowBatchWaitMax);
     downloadFolderEl.value = "zapi-img"; // always reset to default on launch
     if (r.zapSerial != null) serialToggleEl.checked = r.zapSerial;
+    if (r.zapFilenameTemplate && filenameTemplateEl) {
+      filenameTemplateEl.value = r.zapFilenameTemplate;
+    }
     if (r.zapLang) {
       currentLang = r.zapLang;
       langSelectEl.value = currentLang;
@@ -970,12 +1000,29 @@ function persist() {
     flowBatchWaitMax: waitMaxEl.value,
     flowBatchFolder:  downloadFolderEl.value,
     zapSerial:        serialToggleEl.checked,
+    zapFilenameTemplate: filenameTemplateEl?.value || "{serial}_{name}",
   });
 }
 waitMinEl.addEventListener("change", persist);
 waitMaxEl.addEventListener("change", persist);
 downloadFolderEl.addEventListener("change", persist);
 serialToggleEl.addEventListener("change", persist);
+if (filenameTemplateEl) {
+  filenameTemplateEl.addEventListener("change", persist);
+  
+  // Chip click handlers
+  const chips = document.querySelectorAll(".template-chip");
+  chips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      const chipValue = chip.dataset.chip;
+      const currentVal = filenameTemplateEl.value || "";
+      // Add chip value with underscore separator if not empty
+      const newVal = currentVal ? currentVal + "_" + chipValue : chipValue;
+      filenameTemplateEl.value = newVal;
+      persist();
+    });
+  });
+}
 
 // ─────────────────────────────────────────────
 // Statistics & History
@@ -1084,4 +1131,23 @@ exportBtn?.addEventListener("click", async () => {
   link.download = `zapi-flow-results-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+});
+
+// ─────────────────────────────────────────────
+// Retry Failed Queue
+// ─────────────────────────────────────────────
+retryFailedBtn?.addEventListener("click", () => {
+  const failedPrompts = promptStatuses.filter(p => p.status === "failed").map(p => p.text);
+  if (failedPrompts.length === 0) return;
+  
+  // Replace current queue with failed prompts
+  promptsEl.value = failedPrompts.join("\n");
+  rebuildList();
+  persist();
+  
+  // Hide retry button
+  retryFailedBtn.style.display = "none";
+  
+  // Show status message
+  setStatus(`Queue updated with ${failedPrompts.length} failed prompt(s). Click Start to retry.`);
 });
