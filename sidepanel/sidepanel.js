@@ -28,6 +28,16 @@ const downloadFolderEl = document.getElementById("downloadFolder");
 const serialToggleEl   = document.getElementById("serialToggle");
 const langSelectEl     = document.getElementById("langSelect");
 const openDlSettings   = document.getElementById("openDlSettings");
+const exportBtn        = document.getElementById("exportBtn");
+const statsBar         = document.getElementById("statsBar");
+const statTotalEl      = document.getElementById("statTotal");
+const statDoneEl       = document.getElementById("statDone");
+const statFailedEl     = document.getElementById("statFailed");
+const statRetryEl      = document.getElementById("statRetry");
+const statsResetBtn    = document.getElementById("statsReset");
+const historySection   = document.getElementById("historySection");
+const historyListEl    = document.getElementById("historyList");
+const historyClearBtn  = document.getElementById("historyClear");
 
 // ─────────────────────────────────────────────
 // Version from manifest
@@ -77,6 +87,12 @@ const LANGS = {
     statusDone:        "Done ✓",
     statusFailed:      "Failed ✗",
     statusStopped:     "Skipped",
+    statTotal:         "Total",
+    statDone:          "Done",
+    statFailed:        "Failed",
+    statRetry:         "Retries",
+    exportResults:     "Export",
+    historyTitle:      "Prompt History",
     helpTitle:         "Getting Started",
     helpClose:         "Got it",
     helpDelayTitle:    "Random delay",
@@ -786,6 +802,8 @@ async function startQueue(startIndex = 0) {
 
       if (attempt === 1) {
         // Countdown before retry
+        queueStats.retries++;
+        updateStatsDisplay();
         for (let s = 3; s > 0 && isRunning; s--) {
           setStatus(`Prompt ${i + 1} failed — retrying in ${s}s…`);
           await sleep(1000);
@@ -865,6 +883,17 @@ async function startQueue(startIndex = 0) {
   const failedCount  = promptStatuses.filter(p => p.status === "failed").length;
   const stoppedCount = promptStatuses.filter(p => p.status === "stopped").length;
 
+  // Update stats
+  queueStats.total += lines.length;
+  queueStats.done += completed;
+  queueStats.failed += failedCount;
+  updateStatsDisplay();
+  statsBar.style.display = "";
+  chrome.storage.local.set({ zapStats: queueStats });
+
+  // Add to history
+  addToHistory(lines);
+
   if (stoppedCount > 0) {
     // Queue stopped for any reason with skipped prompts — offer to continue
     const firstStopped = promptStatuses.findIndex(p => p.status === "stopped");
@@ -911,7 +940,7 @@ stopBtn.addEventListener("click", async () => {
 // On launch — restore only settings (delay, folder, language)
 // Prompts always start fresh every session
 chrome.storage.local.get(
-  ["flowBatchWaitMin", "flowBatchWaitMax", "zapLang", "zapSerial"],
+  ["flowBatchWaitMin", "flowBatchWaitMax", "zapLang", "zapSerial", "zapStats", "zapHistory"],
   (r) => {
     if (r.flowBatchWaitMin != null) waitMinEl.value = String(r.flowBatchWaitMin);
     if (r.flowBatchWaitMax != null) waitMaxEl.value = String(r.flowBatchWaitMax);
@@ -920,6 +949,15 @@ chrome.storage.local.get(
     if (r.zapLang) {
       currentLang = r.zapLang;
       langSelectEl.value = currentLang;
+    }
+    if (r.zapStats) {
+      queueStats = r.zapStats;
+      updateStatsDisplay();
+      statsBar.style.display = queueStats.total > 0 ? "" : "none";
+    }
+    if (r.zapHistory && Array.isArray(r.zapHistory)) {
+      promptHistory = r.zapHistory;
+      renderHistory();
     }
     applyLanguage();
   }
@@ -938,3 +976,112 @@ waitMinEl.addEventListener("change", persist);
 waitMaxEl.addEventListener("change", persist);
 downloadFolderEl.addEventListener("change", persist);
 serialToggleEl.addEventListener("change", persist);
+
+// ─────────────────────────────────────────────
+// Statistics & History
+// ─────────────────────────────────────────────
+let queueStats = { total: 0, done: 0, failed: 0, retries: 0 };
+let promptHistory = [];
+const MAX_HISTORY = 100;
+
+function updateStatsDisplay() {
+  statTotalEl.textContent  = queueStats.total;
+  statDoneEl.textContent   = queueStats.done;
+  statFailedEl.textContent = queueStats.failed;
+  statRetryEl.textContent  = queueStats.retries;
+}
+
+function resetStats() {
+  queueStats = { total: 0, done: 0, failed: 0, retries: 0 };
+  updateStatsDisplay();
+  chrome.storage.local.set({ zapStats: queueStats });
+}
+
+function addToHistory(prompts) {
+  if (!prompts || prompts.length === 0) return;
+  const entry = {
+    id: Date.now(),
+    prompts: prompts.slice(0, 20),
+    timestamp: new Date().toISOString(),
+    count: prompts.length
+  };
+  promptHistory.unshift(entry);
+  if (promptHistory.length > MAX_HISTORY) {
+    promptHistory = promptHistory.slice(0, MAX_HISTORY);
+  }
+  renderHistory();
+  chrome.storage.local.set({ zapHistory: promptHistory });
+}
+
+function renderHistory() {
+  if (promptHistory.length === 0) {
+    historySection.style.display = "none";
+    return;
+  }
+  historySection.style.display = "";
+  historyListEl.innerHTML = "";
+  promptHistory.forEach(item => {
+    const row = document.createElement("div");
+    row.className = "history-item";
+    const date = new Date(item.timestamp);
+    const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + 
+                    ' ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const firstPrompt = item.prompts[0] || '';
+    const moreText = item.count > 1 ? ` +${item.count - 1} more` : '';
+    row.innerHTML = `
+      <span class="history-text" title="${escHtml(firstPrompt)}">${escHtml(firstPrompt)}${escHtml(moreText)}</span>
+      <span class="history-date">${dateStr}</span>
+    `;
+    row.addEventListener("click", () => {
+      const allPrompts = item.prompts.join("\n");
+      promptsEl.value = promptsEl.value ? promptsEl.value + "\n" + allPrompts : allPrompts;
+      rebuildList();
+      persist();
+    });
+    historyListEl.appendChild(row);
+  });
+}
+
+function clearHistory() {
+  promptHistory = [];
+  renderHistory();
+  chrome.storage.local.set({ zapHistory: promptHistory });
+}
+
+statsResetBtn?.addEventListener("click", () => {
+  resetStats();
+});
+
+historyClearBtn?.addEventListener("click", () => {
+  clearHistory();
+});
+
+// ─────────────────────────────────────────────
+// Export Results
+// ─────────────────────────────────────────────
+exportBtn?.addEventListener("click", async () => {
+  if (promptStatuses.length === 0) return;
+  
+  const lines = parsePrompts();
+  const results = promptStatuses.map((item, i) => ({
+    index: i + 1,
+    prompt: item.text,
+    status: item.status,
+    filename: serialToggleEl.checked 
+      ? `${String(i + 1).padStart(2, '0')}_${safePromptName(item.text)}.jpg`
+      : `${safePromptName(item.text)}.jpg`
+  }));
+  
+  const csvContent = [
+    ['Index', 'Prompt', 'Status', 'Filename'],
+    ...results.map(r => [r.index, `"${r.prompt.replace(/"/g, '""')}"`, r.status, r.filename])
+  ].map(row => row.join(',')).join('\n');
+  
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `zapi-flow-results-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+});
