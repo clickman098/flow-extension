@@ -802,9 +802,21 @@
       }
 
       function hasNewFailure() {
-        return currentFailCount() > beforeFailCount;
+        const failCount = currentFailCount();
+        // Only count as failure if NO new images appeared AND failure count increased
+        // This prevents false failures when image succeeds but old failure cards exist
+        if (failCount > beforeFailCount) {
+          // Double-check: if we have new images, don't mark as failed
+          if (hasNewImage()) {
+            log("Failure card detected but new image also present — marking as success");
+            return false;
+          }
+          return true;
+        }
+        return false;
       }
 
+      // Check for new image FIRST — success takes priority
       if (hasNewImage()) { sendResponse({ done: true, newUrls: getNewUrls() }); return; }
       if (hasNewFailure()) { sendResponse({ failed: true }); return; }
 
