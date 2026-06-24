@@ -630,8 +630,9 @@ async function downloadGeneratedImages(newUrls, serialNum, promptText) {
   const now = new Date();
   const timestamp = now.toISOString().slice(0,19).replace(/[:T]/g,'-');
   
-  // Build custom value (just a placeholder for user to replace)
-  const custom = "custom";
+  // Build custom value - extract any text between {custom_...} brackets or use empty
+  const customMatch = template.match(/{custom_([^}]+)}/);
+  const custom = customMatch ? customMatch[1] : "";
 
   // Filter to only genuine generated-output URLs.
   // Reference/ingredient images uploaded by the user come from blob: URLs
@@ -660,7 +661,8 @@ async function downloadGeneratedImages(newUrls, serialNum, promptText) {
       .replace(/{serial}/g, useSerial ? serial : "")
       .replace(/{name}/g, name)
       .replace(/{timestamp}/g, timestamp)
-      .replace(/{custom}/g, custom);
+      .replace(/{custom_[^}]+}/g, custom)
+      .replace(/{custom}/g, "");
     
     // Clean up double underscores and leading/trailing underscores
     baseName = baseName.replace(/_+/g, "_").replace(/^_|_$/g, "");
@@ -873,17 +875,26 @@ async function startQueue(startIndex = 0) {
         break;
       }
 
-      // Success
+      // Success check: require both non-empty newUrls AND actual count increase
       const newUrls = genRes?.newUrls || [];
-      if (newUrls.length > 0) {
+      const countIncreased = (genRes?.afterCount ?? 0) > beforeCount;
+      
+      if (newUrls.length > 0 && countIncreased) {
         setStatus(t("msgDownloading", i + 1));
         await downloadGeneratedImages(newUrls, i + 1, lines[i]);
+        updateStatus(i, "done");
+        completed++;
+        promptDone = true;
+        break; // success — no retry needed
+      } else {
+        // Looks like a false positive (ZAPI showed success but no new image)
+        if (attempt < 1) continue; // will retry
+        // Both attempts produced no real result — mark failed
+        updateStatus(i, "failed");
+        setStatus(`Prompt ${i + 1} produced no new image — marking failed.`);
+        promptDone = true; // continue queue
+        break;
       }
-
-      updateStatus(i, "done");
-      completed++;
-      promptDone = true;
-      break; // no retry needed
     }
 
     // promptDone = true means either success or skip-after-fail — both continue queue
