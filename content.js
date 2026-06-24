@@ -354,32 +354,17 @@
 
     if (!text) return true;
 
-    // 1. Try synthetic paste
-    dispatchSyntheticPaste(el, text);
-    await sleep(200);
+    // Use ONLY per-character InputEvents (most reliable for Slate/React)
+    // Avoid synthetic paste and bulk beforeinput which can corrupt text
+    log("Inserting text via per-character InputEvents...");
+    await typeInsertTextEvents(el, text, charDelayMs);
+    await sleep(300);
     if (editorSeemsToContain(el, text)) {
-      log("Filled prompt via synthetic paste.");
+      log("Filled prompt via synthetic InputEvents.");
       return true;
     }
 
-    // 2. Try beforeinput
-    log("Text not found, trying beforeinput...");
-    const before = new InputEvent("beforeinput", {
-      bubbles: true, cancelable: true, composed: true,
-      inputType: "insertText", data: text,
-    });
-    el.dispatchEvent(before);
-    el.dispatchEvent(new InputEvent("input", {
-      bubbles: true, composed: true,
-      inputType: "insertText", data: text,
-    }));
-    await sleep(200);
-    if (editorSeemsToContain(el, text)) {
-      log("Filled prompt via insertText beforeinput.");
-      return true;
-    }
-
-    // 3. Try execCommand insertText
+    // Fallback: execCommand per character
     log("Trying execCommand insertText per character...");
     for (let j = 0; j < text.length; j++) {
       try { document.execCommand("insertText", false, text[j]); } catch {}
@@ -388,15 +373,6 @@
     await sleep(200);
     if (editorSeemsToContain(el, text)) {
       log("Filled prompt via execCommand insertText.");
-      return true;
-    }
-
-    // 4. Try InputEvents
-    log("Trying per-character InputEvent insertText...");
-    await typeInsertTextEvents(el, text, charDelayMs);
-    await sleep(200);
-    if (editorSeemsToContain(el, text)) {
-      log("Filled prompt via synthetic InputEvents.");
       return true;
     }
 
