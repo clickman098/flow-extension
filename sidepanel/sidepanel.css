@@ -990,6 +990,94 @@ body::before {
   cursor: not-allowed;
 }
 
+/* ── Filename template row ── */
+.filename-template-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--surface-el);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.template-input-wrap {
+  width: 100%;
+}
+
+.template-input-wrap input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255,255,255,.04);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.template-input-wrap input[type="text"]:focus {
+  outline: none;
+  border-color: var(--purple);
+  box-shadow: 0 0 0 2px rgba(136,102,255,.2);
+}
+
+.template-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.template-chip {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border-strong);
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.template-chip:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(0,187,255,.1);
+  box-shadow: 0 0 8px rgba(0,187,255,.2);
+}
+
+/* ── Retry failed button ── */
+.btn-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 14px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: .04em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-el);
+  color: var(--red);
+  cursor: pointer;
+  transition: all .15s ease;
+  text-transform: uppercase;
+}
+
+.btn-retry:hover {
+  border-color: var(--red);
+  background: rgba(255,51,85,.1);
+  box-shadow: 0 0 10px rgba(255,51,85,.2);
+}
+
+.btn-retry:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
 /* ── History section ── */
 .history-section {
   display: flex;
